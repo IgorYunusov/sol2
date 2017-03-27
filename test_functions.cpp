@@ -170,7 +170,7 @@ TEST_CASE("functions/deducing-return-order-and-multi-get", "Check if return orde
 	// Make sure there are no overload collisions / compiler errors for automatic string conversions
 	std::string f_string_result = f_string();
 	REQUIRE(f_string_result == "this is a string!");
-	f_string_result = f_string();
+	//f_string_result = f_string();
 	REQUIRE(f_string_result == "this is a string!");
 
 	lua.set_function("f", [] {
