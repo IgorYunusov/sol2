@@ -59,6 +59,7 @@ namespace sol {
 			}
 #if !defined(SOL_EXCEPTIONS_SAFE_PROPAGATION)
 			catch (...) {
+				std::exception_ptr eptr = std::current_exception();
 				lua_pushstring(L, "caught (...) exception");
 			}
 #endif
@@ -104,6 +105,9 @@ namespace sol {
 				return std::addressof(item);
 			}
 		};
+
+		struct unchecked_t {};
+		const unchecked_t unchecked = unchecked_t{};
 	} // detail
 
 	struct lua_nil_t {};
@@ -115,8 +119,11 @@ namespace sol {
 	const nil_t nil{};
 #endif
 
-	struct metatable_key_t {};
-	const metatable_key_t metatable_key = {};
+	struct metatable_t {};
+	const metatable_t metatable_key = {};
+
+	struct env_t {};
+	const env_t env_key = {};
 
 	struct no_metatable_t {};
 	const no_metatable_t no_metatable = {};
@@ -308,6 +315,18 @@ namespace sol {
 	};
 
 	template <typename T>
+	struct nested {
+		T source;
+		
+		template <typename... Args>
+		nested(Args&&... args) : source(std::forward<Args>(args)...) {}
+
+		operator std::add_lvalue_reference_t<T>() {
+			return source;
+		}
+	};
+
+	template <typename T>
 	as_table_t<T> as_table(T&& container) {
 		return as_table_t<T>(std::forward<T>(container));
 	}
@@ -322,6 +341,19 @@ namespace sol {
 		}
 	};
 
+	struct new_table {
+		int sequence_hint = 0;
+		int map_hint = 0;
+
+		new_table() = default;
+		new_table(const new_table&) = default;
+		new_table(new_table&&) = default;
+		new_table& operator=(const new_table&) = default;
+		new_table& operator=(new_table&&) = default;
+
+		new_table(int sequence_hint, int map_hint = 0) : sequence_hint(sequence_hint), map_hint(map_hint) {}
+	};
+
 	enum class call_syntax {
 		dot = 0,
 		colon = 1
@@ -333,7 +365,9 @@ namespace sol {
 		runtime = LUA_ERRRUN,
 		memory = LUA_ERRMEM,
 		handler = LUA_ERRERR,
-		gc = LUA_ERRGCMM
+		gc = LUA_ERRGCMM,
+		syntax = LUA_ERRSYNTAX,
+		file = LUA_ERRFILE,
 	};
 
 	enum class thread_status : int {
@@ -372,6 +406,61 @@ namespace sol {
 		table | boolean | function | userdata | lightuserdata
 	};
 
+	inline const std::string& to_string(call_status c) {
+		static const std::array<std::string, 8> names{{
+			"ok",
+			"yielded",
+			"runtime",
+			"memory",
+			"handler",
+			"gc",
+			"syntax",
+			"file",
+		}};
+		switch (c) {
+		case call_status::ok:
+			return names[0];
+		case call_status::yielded:
+			return names[1];
+		case call_status::runtime:
+			return names[2];
+		case call_status::memory:
+			return names[3];
+		case call_status::handler:
+			return names[4];
+		case call_status::gc:
+			return names[5];
+		case call_status::syntax:
+			return names[6];
+		case call_status::file:
+			return names[7];
+		}
+		return names[0];
+	}
+
+	inline const std::string& to_string(load_status c) {
+		static const std::array<std::string, 8> names{ {
+				"ok",
+				"memory",
+				"gc",
+				"syntax",
+				"file",
+			} };
+		switch (c) {
+		case load_status::ok:
+			return names[0];
+		case load_status::memory:
+			return names[1];
+		case load_status::gc:
+			return names[2];
+		case load_status::syntax:
+			return names[3];
+		case load_status::file:
+			return names[4];
+		}
+		return names[0];
+	}
+
 	enum class meta_function {
 		construct,
 		index,
@@ -408,47 +497,45 @@ namespace sol {
 
 	typedef meta_function meta_method;
 
-	const std::array<std::string, 2> meta_variable_names = { {
-		"__index",
-		"__newindex",
-	} };
+	inline const std::array<std::string, 29>& meta_function_names() {
+		static const std::array<std::string, 29> names = { {
+				"new",
+				"__index",
+				"__newindex",
+				"__mode",
+				"__call",
+				"__mt",
+				"__tostring",
+				"__len",
+				"__unm",
+				"__add",
+				"__sub",
+				"__mul",
+				"__div",
+				"__mod",
+				"__pow",
+				"__concat",
+				"__eq",
+				"__lt",
+				"__le",
+				"__gc",
 
-	const std::array<std::string, 29> meta_function_names = { {
-		"new",
-		"__index",
-		"__newindex",
-		"__mode",
-		"__call",
-		"__mt",
-		"__tostring",
-		"__len",
-		"__unm",
-		"__add",
-		"__sub",
-		"__mul",
-		"__div",
-		"__mod",
-		"__pow",
-		"__concat",
-		"__eq",
-		"__lt",
-		"__le",
-		"__gc",
-		
-		"__idiv",
-		"__shl",
-		"__shr",
-		"__bnot",
-		"__band",
-		"__bor",
-		"__bxor",
+				"__idiv",
+				"__shl",
+				"__shr",
+				"__bnot",
+				"__band",
+				"__bor",
+				"__bxor",
 
-		"__pairs",
-		"__next"
-	} };
+				"__pairs",
+				"__next"
+			} };
+		return names;
+	}
 
-	inline const std::string& name_of(meta_function mf) {
-		return meta_function_names[static_cast<int>(mf)];
+	inline const std::string& to_string(meta_function mf) {
+		return meta_function_names()[static_cast<int>(mf)];
 	}
 
 	inline type type_of(lua_State* L, int index) {
@@ -502,22 +589,33 @@ namespace sol {
 	using table_core = basic_table_core<b, reference>;
 	template <bool b>
 	using stack_table_core = basic_table_core<b, stack_reference>;
+	template <typename T>
+	using basic_table = basic_table_core<false, T>;
 	typedef table_core<false> table;
 	typedef table_core<true> global_table;
 	typedef stack_table_core<false> stack_table;
 	typedef stack_table_core<true> stack_global_table;
+	template <typename base_t>
+	struct basic_environment;
+	using environment = basic_environment<reference>;
+	using stack_environment = basic_environment<stack_reference>;
 	template <typename T>
 	class basic_function;
 	template <typename T>
 	class basic_protected_function;
-	using function = basic_function<reference>;
 	using protected_function = basic_protected_function<reference>;
-	using stack_function = basic_function<stack_reference>;
 	using stack_protected_function = basic_protected_function<stack_reference>;
 	using unsafe_function = basic_function<reference>;
 	using safe_function = basic_protected_function<reference>;
 	using stack_unsafe_function = basic_function<stack_reference>;
 	using stack_safe_function = basic_protected_function<stack_reference>;
+#ifdef SOL_SAFE_FUNCTIONS
+	using function = protected_function;
+	using stack_function = stack_protected_function;
+#else
+	using function = unsafe_function;
+	using stack_function = stack_unsafe_function;
+#endif
 	template <typename base_t>
 	class basic_object;
 	template <typename base_t>
@@ -606,6 +704,21 @@ namespace sol {
 		template <bool b, typename Base>
 		struct lua_type_of<basic_table_core<b, Base>> : std::integral_constant<type, type::table> { };
 
+		template <typename B>
+		struct lua_type_of<basic_environment<B>> : std::integral_constant<type, type::table> { };
+
+		template <>
+		struct lua_type_of<metatable_t> : std::integral_constant<type, type::table> { };
+
+		template <>
+		struct lua_type_of<env_t> : std::integral_constant<type, type::table> { };
+
+		template <>
+		struct lua_type_of<new_table> : std::integral_constant<type, type::table> { };
+
+		template <typename T>
+		struct lua_type_of<as_table_t<T>> : std::integral_constant<type, type::table> {};
+
 		template <>
 		struct lua_type_of<reference> : std::integral_constant<type, type::poly> {};
 
@@ -687,6 +800,18 @@ namespace sol {
 		template <typename T, typename C = void>
 		struct is_container : std::false_type {};
 
+		template <>
+		struct is_container<std::string> : std::false_type {};
+
+		template <>
+		struct is_container<std::wstring> : std::false_type {};
+
+		template <>
+		struct is_container<std::u16string> : std::false_type {};
+
+		template <>
+		struct is_container<std::u32string> : std::false_type {};
+
 		template <typename T>
 		struct is_container<T, std::enable_if_t<meta::has_begin_end<meta::unqualified_t<T>>::value>> : std::true_type {};
 
@@ -704,10 +829,14 @@ namespace sol {
 	struct is_unique_usertype : std::integral_constant<bool, unique_usertype_traits<T>::value> {};
 
 	template <typename T>
-	struct lua_type_of : detail::lua_type_of<T> {};
+	struct lua_type_of : detail::lua_type_of<T> {
+		typedef int SOL_INTERNAL_UNSPECIALIZED_MARKER_;
+	};
 
 	template <typename T>
-	struct lua_size : std::integral_constant<int, 1> { };
+	struct lua_size : std::integral_constant<int, 1> { 
+		typedef int SOL_INTERNAL_UNSPECIALIZED_MARKER_; 
+	};
 
 	template <typename A, typename B>
 	struct lua_size<std::pair<A, B>> : std::integral_constant<int, lua_size<A>::value + lua_size<B>::value> { };
@@ -715,10 +844,24 @@ namespace sol {
 	template <typename... Args>
 	struct lua_size<std::tuple<Args...>> : std::integral_constant<int, detail::accumulate<int, 0, lua_size, Args...>::value> { };
 
+	namespace detail {
+		template <typename...>
+		struct void_ { typedef void type; };
+		template <typename T, typename = void>
+		struct has_internal_marker_impl : std::false_type {};
+		template <typename T>
+		struct has_internal_marker_impl<T, typename void_<typename T::SOL_INTERNAL_UNSPECIALIZED_MARKER_>::type> : std::true_type {};
+
+		template <typename T>
+		struct has_internal_marker : has_internal_marker_impl<T> {};
+	}
+
 	template <typename T>
 	struct is_lua_primitive : std::integral_constant<bool,
 		type::userdata != lua_type_of<meta::unqualified_t<T>>::value
-		|| (lua_size<T>::value > 1)
+		|| ((type::userdata == lua_type_of<meta::unqualified_t<T>>::value) 
+			&& detail::has_internal_marker<lua_type_of<meta::unqualified_t<T>>>::value 
+			&& !detail::has_internal_marker<lua_size<meta::unqualified_t<T>>>::value)
 		|| std::is_base_of<reference, meta::unqualified_t<T>>::value
 		|| std::is_base_of<stack_reference, meta::unqualified_t<T>>::value
 		|| meta::is_specialization_of<std::tuple, meta::unqualified_t<T>>::value
@@ -805,6 +948,14 @@ namespace sol {
 	inline type type_of() {
 		return lua_type_of<meta::unqualified_t<T>>::value;
 	}
+
+	namespace detail {
+		template <typename T>
+		struct lua_type_of<nested<T>, std::enable_if_t<::sol::is_container<T>::value>> : std::integral_constant<type, type::table> {};
+
+		template <typename T>
+		struct lua_type_of<nested<T>, std::enable_if_t<!::sol::is_container<T>::value>> : lua_type_of<T> {};
+	} // detail
 } // sol
 
 #endif // SOL_TYPES_HPP

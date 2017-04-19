@@ -10,7 +10,7 @@ For the hard technical components of Lua and its ecosystem we support, here is t
 what Sol supports
 -----------------
 
-* Support for Lua 5.1, 5.2, and 5.3. We achieve this through our "doc:`compatibility<compatibility>` header.
+* Support for Lua 5.1, 5.2, and 5.3. We achieve this through our :doc:`compatibility<api/compatibility>` header.
 
 * :doc:`Table<api/table>` support: setting values, getting values of multiple (different) types
 	- :doc:`Lazy evaluation<api/proxy>` for nested/chained queries
@@ -87,6 +87,7 @@ Explanations for a few categories are below (rest are self-explanatory).
 * overloading: the ability to call overloaded functions, matched based on arity or type (``foo( 1 )`` from lua calls a different function then ``foo( "bark" )``).
 * Lua thread: basic wrapping of the lua thread API; ties in with coroutine.
 * coroutines: allowing a function to be called multiple times, resuming the execution of a Lua coroutine each time
+* environments: an abstraction for getting, setting and manipulating an environment, using table techniques, functions or otherwise. Typically for the purposes of sandboxing
 
 +---------------------------+-------------+------------+----------+---------+----------+-----------+-----------+----------------+----------+----------+-----------+-----------------+--------+
 |                           |   plain C   | luawrapper | lua-intf | luabind |  Selene  |    Sol2   |   oolua   |   lua-api-pp   |  kaguya  |   SLB3   |    SWIG   | luacppinterface | luwra  |
@@ -124,6 +125,8 @@ Explanations for a few categories are below (rest are self-explanatory).
 +---------------------------+-------------+------------+----------+---------+----------+-----------+-----------+----------------+----------+----------+-----------+-----------------+--------+
 | Lua thread                |      ~      |     ✗      |     ~    |    ✗    |     ✗    |     ✔     |     ✔     |        ✗       |     ✔    |     ✗    |     ✗     |        ✔        |    ✗   |
 +---------------------------+-------------+------------+----------+---------+----------+-----------+-----------+----------------+----------+----------+-----------+-----------------+--------+
+| environments              |      ✗      |     ✗      |     ✗    |    ✗    |     ✗    |     ✔     |     ✗     |        ✗       |     ✗    |     ✗    |     ✗     |        ✗        |    ✗   |
++---------------------------+-------------+------------+----------+---------+----------+-----------+-----------+----------------+----------+----------+-----------+-----------------+--------+
 | coroutines                |      ~      |     ✗      |     ~    |    ✔    |     ✔    |     ✔     |     ✗     |        ✗       |     ✔    |     ✗    |     ✗     |        ✔        |    ✗   |
 +---------------------------+-------------+------------+----------+---------+----------+-----------+-----------+----------------+----------+----------+-----------+-----------------+--------+
 | no-rtti support           |      ✔      |     ✗      |     ✔    |    ✗    |     ✗    |     ✔     |     ✔     |        ✗       |     ✔    |     ✔    |     ~     |        ✔        |    ✔   |
@@ -147,7 +150,7 @@ notes on implementations
 
 Plain C - 
 
-* Obviously you can do anything you want with Plain C, but the effort involved is astronomical in comparison to what frameworks offer
+* Obviously you can do anything you want with Plain C, but the effort involved is astronomical in comparison to what other wrappers, libraries and frameworks offer
 * Does not scale very well (in terms of developer ease of use)
 * Compilation (or package manager use) is obviously required for your platform and required to use ANY of these libraries, but that's okay because all libraries need some version of Lua anyways, so you always have this!
 
@@ -159,6 +162,7 @@ kaguya -
 * Library author (satoren) is a nice guy!
 * C++11/14, or boostified (which makes it C++03 compatible)
 * Class registration is a bit verbose, but not as offensive as OOLua or lua-intf or others
+* Constructor setting syntax is snazzy and good
 
 Sol -
 

@@ -47,6 +47,23 @@ running lua code
 	int value = lua.script("return 54");
 	// value == 54
 
+To run Lua code but have an error handler in case things go wrong:
+
+.. code-block:: cpp
+
+	sol::state lua;
+	
+	// the default handler panics or throws, depending on your settings
+	auto result1 = lua.script("bad.code", &sol::default_on_error);
+
+	auto result2 = lua.script("123 herp.derp", [](lua_State* L, sol::protected_function_result pfr) {
+		// pfr will contain things that went wrong, for either loading or executing the script
+		// Can throw your own custom error
+		// You can also just return it, and let the call-site handle the error if necessary.
+		return pfr;
+	});
+
+
 To check the success of a loading operation:
 
 .. code-block:: cpp
@@ -54,16 +71,24 @@ To check the success of a loading operation:
 	// load file without execute
 	sol::load_result script1 = lua.load_file("path/to/luascript.lua");
 	script1(); //execute
+	
 	// load string without execute
 	sol::load_result script2 = lua.load("a = 'test'");
-	script2(); //execute
+	sol::protected_function_result script2result = script2(); //execute
+	// optionally, check if it worked
+	if (script2result.valid()) {
+		// yay!
+	}
+	else {
+		// aww
+	}
 
 	sol::load_result script3 = lua.load("return 24");
 	int value2 = script3(); // execute, get return value
 	// value2 == 24
 
 
-To check whether a script was successfully run or not (after loading is assumed to be successful):
+To check whether a script was successfully run or not (if the actual loading is successful):
 
 .. code-block:: cpp
 
@@ -450,7 +475,7 @@ multiple returns to lua
 	result2 = lua["f"](100, 200, "BARK BARK BARK!");
 	// result2 == { 100, 200, "BARK BARK BARK!" }
 
-	int a, int b;
+	int a, b;
 	std::string c;
 	sol::tie( a, b, c ) = lua["f"](100, 200, "bark");
 	// a == 100
@@ -613,7 +638,7 @@ advanced
 
 Some more advanced things you can do/read about:
 	* :doc:`metatable manipulations<../api/metatable_key>` allow a user to change how indexing, function calls, and other things work on a single type.
-	* :doc:`ownership semantics<ownership>` are described for how lua deals with (raw) pointers.
+	* :doc:`ownership semantics<ownership>` are described for how Lua deals with its own internal references and (raw) pointers.
 	* :doc:`stack manipulation<../api/stack>` to safely play with the stack. You can also define customization points for ``stack::get``/``stack::check``/``stack::push`` for your type.
 	* :doc:`make_reference/make_object convenience function<../api/make_reference>` to get the same benefits and conveniences as the low-level stack API but put into objects you can specify.
 	* :doc:`stack references<../api/stack_reference>` to have zero-overhead Sol abstractions while not copying to the Lua registry.

@@ -1,5 +1,6 @@
 #define SOL_CHECK_ARGUMENTS
 #include <sol.hpp>
+
 #include <memory>
 #include <iostream>
 #include <cassert>
@@ -48,7 +49,7 @@ int main() {
 		lua.set_usertype("generator", generator_registration);
 	}
 
-	// Can update a simple_usertype at runtime, after registration
+	// Can update a usertype at runtime, after registration
 	lua["generator"]["generate_list"] = [](generator& self) { return self.generate_list(); };
 	// can set 'static methods' (no self) as well
 	lua["generator"]["get_num"] = []() { return 100; };

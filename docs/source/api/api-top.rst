@@ -10,9 +10,15 @@ Browse the various function and classes :doc:`Sol<../index>` utilizes to make yo
    :maxdepth: 2
 
    state
+   reference
+   stack_reference
+   make_reference
    table
+   userdata
+   environment
    proxy
    containers
+   nested
    as_table
    usertype
    simple_usertype
@@ -24,11 +30,7 @@ Browse the various function and classes :doc:`Sol<../index>` utilizes to make yo
    coroutine
    error
    object
-   userdata
-   reference
    thread
-   stack_reference
-   make_reference
    optional
    this_state
    variadic_args
@@ -46,3 +48,4 @@ Browse the various function and classes :doc:`Sol<../index>` utilizes to make yo
    compatibility
    types
    metatable_key
+   new_table

@@ -1,4 +1,6 @@
+#define SOL_CHECK_ARGUMENTS
 #include <sol.hpp>
+
 #include <iostream>
 #include <cassert>
 #include <cmath>
@@ -71,7 +73,11 @@ int main() {
     {
         // Notice the brace: this means we're in a new scope
         // first, define the different types of constructors
-        sol::constructors<sol::types<>, sol::types<float>, sol::types<float, float>> ctor;
+		// notice here that the return type 
+		// on the function-type doesn't exactly matter,
+		// which allows you to use a shorter class name/void 
+		// if necessary
+        sol::constructors<vector(), vector(float), void(float, float)> ctor;
 
         // the only template parameter is the class type
         // the first argument of construction is the name

@@ -1,3 +1,4 @@
+#define SOL_CHECK_ARGUMENTS
 #include <sol.hpp>
 
 #include <iostream>
@@ -16,6 +17,11 @@ namespace sol {
 	template <>
 	struct lua_size<two_things> : std::integral_constant<int, 2> {};
 
+	// Then, specialize the type
+	// this makes sure Sol can return it properly
+	template <>
+	struct lua_type_of<two_things> : std::integral_constant<sol::type, sol::type::poly> {};
+
 	// Now, specialize various stack structures
 	namespace stack {
 
@@ -29,8 +35,8 @@ namespace sol {
 				// its absolute position using the lua_absindex function 
 				int absolute_index = lua_absindex(L, index);
 				// Check first and second second index for being the proper types
-				bool success = stack::check<int>(L, absolute_index + 1, handler)
-					&& stack::check<bool>(L, absolute_index, handler);
+				bool success = stack::check<int>(L, absolute_index, handler)
+					&& stack::check<bool>(L, absolute_index + 1, handler);
 				tracking.use(2);
 				return success;
 			}
@@ -67,22 +73,24 @@ namespace sol {
 }
 
 int main() {
+	std::cout << "=== customization example ===" << std::endl;
+	std::cout << std::boolalpha;
+	
 	sol::state lua;
+	lua.open_libraries(sol::lib::base);
 
 	// Create a pass-through style of function
-	lua.script("function f ( a, b ) return a, b end");
+	lua.script("function f ( a, b ) print(a, b) return a, b end");
 
 	// get the function out of Lua
 	sol::function f = lua["f"];
 
-	two_things things = f(two_things{ 24, true });
+	two_things things = f(two_things{ 24, false });
 	assert(things.a == 24);
-	assert(things.b == true);
+	assert(things.b == false);
 	// things.a == 24
 	// things.b == true
 
-	std::cout << "=== customization example ===" << std::endl;
-	std::cout << std::boolalpha;
 	std::cout << "things.a: " << things.a << std::endl;
 	std::cout << "things.b: " << things.b << std::endl;
 	std::cout << std::endl;

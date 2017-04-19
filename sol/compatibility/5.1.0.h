@@ -27,7 +27,6 @@
 #if SOL_LUA_VERSION == 501
 /* Lua 5.1 */
 
-#include <lua.hpp>
 #include <stddef.h>
 #include <string.h>
 #include <stdio.h>
@@ -48,7 +47,7 @@
 
 /* LuaJIT does not have the updated error codes for thread status/function returns */
 #ifndef LUA_ERRGCMM
-#define LUA_ERRGCMM (LUA_ERRERR + 1)
+#define LUA_ERRGCMM (LUA_ERRERR + 2)
 #endif // LUA_ERRGCMM
 
 /* LuaJIT does not support continuation contexts / return error codes? */

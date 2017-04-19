@@ -24,6 +24,7 @@
 
 #include "error.hpp"
 #include "table.hpp"
+#include "environment.hpp"
 #include "load_result.hpp"
 #include <memory>
 
@@ -50,6 +51,29 @@ namespace sol {
 		kb *= 1024;
 		kb += lua_gc(L, LUA_GCCOUNTB, 0);
 		return kb;
+	}
+
+	inline protected_function_result simple_on_error(lua_State*, sol::protected_function_result result) {
+		return result;
+	}
+
+	inline protected_function_result default_on_error( lua_State* L, protected_function_result pfr ) {
+		type t = type_of(L, pfr.stack_index());
+		std::string err = to_string(pfr.status()) + " error";
+		if (t == type::string) {
+			err += " ";
+			err += stack::get<std::string>(L, pfr.stack_index());
+		}
+#ifdef SOL_NO_EXCEPTIONS
+		if (t != type::nil) {
+			lua_pop(L, 1);
+		}
+		stack::push(L, err);
+		lua_error(L);
+#else
+		throw error(detail::direct_error, err);
+#endif
+		return pfr;
 	}
 
 	class state_view {
@@ -233,14 +257,92 @@ namespace sol {
 			return require_core(key, [this, &filename]() {stack::script_file(L, filename); }, create_global);
 		}
 
+		template <typename E>
+		protected_function_result do_string(const std::string& code, const basic_environment<E>& env) {
+			load_status x = static_cast<load_status>(luaL_loadstring(L, code.c_str()));
+			if (x != load_status::ok) {
+				return protected_function_result(L, -1, 0, 1, static_cast<call_status>(x));
+			}
+			protected_function pf(L, -1);
+			pf.pop();
+			set_environment(env, pf);
+			return pf();
+		}
+
+		template <typename E>
+		protected_function_result do_file(const std::string& filename, const basic_environment<E>& env) {
+			load_status x = static_cast<load_status>(luaL_loadfile(L, filename.c_str()));
+			if (x != load_status::ok) {
+				return protected_function_result(L, -1, 0, 1, static_cast<call_status>(x));
+			}
+			protected_function pf(L, -1);
+			pf.pop();
+			set_environment(env, pf);
+			return pf();
+		}
+
 		protected_function_result do_string(const std::string& code) {
-			sol::protected_function pf = load(code);
+			load_status x = static_cast<load_status>(luaL_loadstring(L, code.c_str()));
+			if (x != load_status::ok) {
+				return protected_function_result(L, -1, 0, 1, static_cast<call_status>(x));
+			}
+			protected_function pf(L, -1);
+			pf.pop();
 			return pf();
 		}
 
 		protected_function_result do_file(const std::string& filename) {
-			sol::protected_function pf = load_file(filename);
+			load_status x = static_cast<load_status>(luaL_loadfile(L, filename.c_str()));
+			if (x != load_status::ok) {
+				return protected_function_result(L, -1, 0, 1, static_cast<call_status>(x));
+			}
+			protected_function pf(L, -1);
+			pf.pop();
 			return pf();
+		}
+
+		protected_function_result script(const std::string& code, const environment& env) {
+			return script(code, env, sol::default_on_error);
+		}
+
+		protected_function_result script_file(const std::string& filename, const environment& env) {
+			return script_file(filename, env, sol::default_on_error);
+		}
+
+		template <typename Fx, meta::disable<meta::is_specialization_of<basic_environment, meta::unqualified_t<Fx>>> = meta::enabler>
+		protected_function_result script(const std::string& code, Fx&& on_error) {
+			protected_function_result pfr = do_string(code);
+			if (!pfr.valid()) {
+				return on_error(L, std::move(pfr));
+			}
+			return pfr;
+		}
+
+		template <typename Fx, meta::disable<meta::is_specialization_of<basic_environment, meta::unqualified_t<Fx>>> = meta::enabler>
+		protected_function_result script_file(const std::string& filename, Fx&& on_error) {
+			protected_function_result pfr = do_file(filename);
+			if (!pfr.valid()) {
+				return on_error(L, std::move(pfr));
+			}
+			return pfr;
+		}
+
+		template <typename Fx, typename E>
+		protected_function_result script(const std::string& code, const basic_environment<E>& env, Fx&& on_error) {
+			protected_function_result pfr = do_string(code, env);
+			if (!pfr.valid()) {
+				return on_error(L, std::move(pfr));
+			}
+			return pfr;
+		}
+
+		template <typename Fx, typename E>
+		protected_function_result script_file(const std::string& filename, const basic_environment<E>& env, Fx&& on_error) {
+			protected_function_result pfr = do_file(filename, env);
+			if (!pfr.valid()) {
+				return on_error(L, std::move(pfr));
+			}
+			return pfr;
 		}
 
 		function_result script(const std::string& code) {

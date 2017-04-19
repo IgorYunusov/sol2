@@ -27,6 +27,36 @@
 
 namespace sol {
 	namespace stack {
+		inline void remove(lua_State* L, int index, int count) {
+			if (count < 1)
+				return;
+			int top = lua_gettop(L);
+			if (index == -count || top == index) {
+				// Slice them right off the top
+				lua_pop(L, static_cast<int>(count));
+				return;
+			}
+
+			// Remove each item one at a time using stack operations
+			// Probably slower, maybe, haven't benchmarked,
+			// but necessary
+			if (index < 0) {
+				index = lua_gettop(L) + (index + 1);
+			}
+			int last = index + count;
+			for (int i = index; i < last; ++i) {
+				lua_remove(L, index);
+			}
+		}
+
+		struct push_popper_at {
+			lua_State* L;
+			int index;
+			int count;
+			push_popper_at(lua_State* luastate, int index = -1, int count = 1) : L(luastate), index(index), count(count) { }
+			~push_popper_at() { remove(L, index, count); }
+		};
+
 		template <bool top_level>
 		struct push_popper_n {
 			lua_State* L;
@@ -52,6 +82,12 @@ namespace sol {
 		template <bool top_level = false, typename T>
 		push_popper<top_level, T> push_pop(T&& x) {
 			return push_popper<top_level, T>(std::forward<T>(x));
+		}
+		template <typename T>
+		push_popper_at push_pop_at(T&& x) {
+			int c = x.push();
+			lua_State* L = x.lua_state();
+			return push_popper_at(L, lua_absindex(L, -c), c);
 		}
 		template <bool top_level = false>
 		push_popper_n<top_level> pop_n(lua_State* L, int x) {
@@ -188,6 +224,22 @@ namespace sol {
 
 	inline bool operator!= (const reference& l, const reference& r) {
 		return !operator==(l, r);
+	}
+
+	inline bool operator==(const reference& lhs, const lua_nil_t&) {
+		return !lhs.valid();
+	}
+
+	inline bool operator==(const lua_nil_t&, const reference& rhs) {
+		return !rhs.valid();
+	}
+
+	inline bool operator!=(const reference& lhs, const lua_nil_t&) {
+		return lhs.valid();
+	}
+
+	inline bool operator!=(const lua_nil_t&, const reference& rhs) {
+		return rhs.valid();
 	}
 } // sol
 

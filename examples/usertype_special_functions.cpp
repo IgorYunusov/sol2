@@ -1,5 +1,6 @@
 #define SOL_CHECK_ARGUMENTS
 #include <sol.hpp>
+
 #include <iostream>
 #include <cassert>
 #include <cmath>
@@ -29,7 +30,7 @@ int main() {
 	lua.open_libraries();
 
 	lua.new_usertype<vec>("vec", 
-		sol::constructors<sol::types<>, sol::types<double, double>>(),
+		sol::constructors<vec(), vec(double, double)>(),
 		"dot", &dot,
 		"norm", [](const vec& self) { double len = std::sqrt(dot(self, self)); return vec(self.x / len, self.y / len); },
 		// we use `sol::resolve` because other operator+ can exist

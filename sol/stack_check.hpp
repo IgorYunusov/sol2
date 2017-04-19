@@ -226,7 +226,7 @@ namespace sol {
 					return false;
 				}
 				// Do advanced check for call-style userdata?
-				static const auto& callkey = name_of(meta_function::call);
+				static const auto& callkey = to_string(meta_function::call);
 				if (lua_getmetatable(L, index) == 0) {
 					// No metatable, no __call key possible
 					handler(L, index, type::function, t);
@@ -259,7 +259,51 @@ namespace sol {
 					return true;
 				}
 				if (t != type::userdata) {
-					handler(L, index, type::function, t);
+					handler(L, index, type::table, t);
+					return false;
+				}
+				return true;
+			}
+		};
+
+		template <type expected, typename C>
+		struct checker<metatable_t, expected, C> {
+			template <typename Handler>
+			static bool check(lua_State* L, int index, Handler&& handler, record& tracking) {
+				tracking.use(1);
+				if (lua_getmetatable(L, index) == 0) {
+					return true;
+				}
+				type t = type_of(L, -1);
+				if (t == type::table || t == type::none || t == type::nil) {
+					lua_pop(L, 1);
+					return true;
+				}
+				if (t != type::userdata) {
+					lua_pop(L, 1);
+					handler(L, index, type::table, t);
+					return false;
+				}
+				return true;
+			}
+		};
+
+		template <type expected, typename C>
+		struct checker<env_t, expected, C> {
+			template <typename Handler>
+			static bool check(lua_State* L, int index, Handler&& handler, record& tracking) {
+				tracking.use(1);
+				if (lua_getmetatable(L, index) == 0) {
+					return true;
+				}
+				type t = type_of(L, -1);
+				if (t == type::table || t == type::none || t == type::nil) {
+					lua_pop(L, 1);
+					return true;
+				}
+				if (t != type::userdata) {
+					lua_pop(L, 1);
+					handler(L, index, type::table, t);
 					return false;
 				}
 				return true;

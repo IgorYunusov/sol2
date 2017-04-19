@@ -490,3 +490,71 @@ TEST_CASE("containers/to_args", "Test that the to_args abstractions works") {
 	REQUIRE(d == 12);
 
 }
+
+TEST_CASE("containers/ipairs-test", "ensure that abstractions roundtrip properly and push nils to stop pairs / ipairs") {
+	struct thing {
+		int x = 20;
+	};
+	thing t{};
+	sol::state lua;
+	lua.open_libraries();
+
+	lua.set_function("f", [&t]() {
+		return std::vector<thing*>(5, &t);
+	});
+
+	lua.script(R"(
+c = f()
+)");
+
+	lua.script(R"(
+check = {}
+local i = 1
+while c[i] do
+	check[i] = c[i]
+	i = i + 1
+end
+)");
+	sol::table c = lua["check"];
+	for (std::size_t i = 1; i < 6; ++i) {
+		thing& ct = c[i];
+		REQUIRE(&t == &ct);
+		REQUIRE(ct.x == 20);
+	}
+}
+
+TEST_CASE("containers/append-idiom", "ensure the append-idiom works as intended") {
+	sol::state lua;
+	lua.open_libraries(sol::lib::base);
+	lua.script(
+R"(
+function f_fill(vec)
+	print("#vec in lua: " .. #vec)
+	for k = 1, #vec do
+		vec[k] = k
+	end
+	print("#vec in lua: " .. #vec)
+end
+function f_append(vec)
+	print("#vec in lua: " .. #vec)
+	vec[#vec] = -10456407
+	vec[#vec + 1] = -54
+	print("#vec in lua: " .. #vec)
+end
+)");
+	std::vector<int> fill_cmp{ 1, 2, 3 };
+	std::vector<int> append_cmp{ -1, -1, -10456407, -54 };
+
+	std::vector<int> vec1{ -1, -1, -1 };
+	std::vector<int> vec2{ -1, -1, -1 };
+
+	REQUIRE(vec1.size() == 3);
+	lua["f_fill"](vec1);
+	REQUIRE(vec1.size() == 3);
+	REQUIRE(vec1 == fill_cmp);
+
+	REQUIRE(vec2.size() == 3);
+	lua["f_append"](vec2);
+	REQUIRE(vec2.size() == 4);
+	REQUIRE(vec2 == append_cmp);
+}

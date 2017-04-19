@@ -31,14 +31,15 @@
 
 #ifndef SOL_NO_COMPAT
 
-#ifdef __cplusplus
+#if defined(__cplusplus) && !defined(SOL_USING_CXX_LUA)
 extern "C" {
 #endif
+#include "compatibility/5.2.0.h"
 #include "compatibility/5.1.0.h"
 #include "compatibility/5.0.0.h"
 #include "compatibility/5.x.x.h"
 #include "compatibility/5.x.x.inl"
-#ifdef __cplusplus
+#if defined(__cplusplus) && !defined(SOL_USING_CXX_LUA)
 }
 #endif
 
