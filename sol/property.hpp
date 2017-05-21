@@ -1,6 +1,6 @@
 // The MIT License (MIT)
 
-// Copyright (c) 2013-2016 Rapptz, ThePhD and contributors
+// Copyright (c) 2013-2017 Rapptz, ThePhD and contributors
 
 // Permission is hereby granted, free of charge, to any person obtaining a copy of
 // this software and associated documentation files (the "Software"), to deal in
@@ -74,6 +74,11 @@ namespace sol {
 	template <typename F>
 	inline decltype(auto) readonly_property(F&& f) {
 		return property_detail::property(std::true_type(), std::forward<F>(f));
+	}
+
+	template <typename F>
+	inline decltype(auto) writeonly_property(F&& f) {
+		return property_detail::property(std::false_type(), std::forward<F>(f));
 	}
 
 	// Allow someone to make a member variable readonly (const)

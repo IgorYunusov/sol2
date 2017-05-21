@@ -1,6 +1,6 @@
 // The MIT License (MIT)
 
-// Copyright (c) 2013-2016 Rapptz, ThePhD and contributors
+// Copyright (c) 2013-2017 Rapptz, ThePhD and contributors
 
 // Permission is hereby granted, free of charge, to any person obtaining a copy of
 // this software and associated documentation files (the "Software"), to deal in
@@ -40,15 +40,50 @@ namespace sol {
 		typedef int(*member_search)(lua_State*, void*, int);
 
 		struct call_information {
-			member_search first;
-			member_search second;
+			member_search index;
+			member_search new_index;
 			int runtime_target;
 
-			call_information(member_search first, member_search second) : call_information(first, second, -1) {}
-			call_information(member_search first, member_search second, int runtimetarget) : first(first), second(second), runtime_target(runtimetarget) {}
+			call_information(member_search index, member_search newindex) : call_information(index, newindex, -1) {}
+			call_information(member_search index, member_search newindex, int runtimetarget) : index(index), new_index(newindex), runtime_target(runtimetarget) {}
 		};
 
 		typedef std::unordered_map<std::string, call_information> mapping_t;
+		
+		struct variable_wrapper {
+			virtual int index(lua_State* L) = 0;
+			virtual int new_index(lua_State* L) = 0;
+			virtual ~variable_wrapper() {};
+		};
+
+		template <typename T, typename F>
+		struct callable_binding : variable_wrapper {
+			F fx;
+
+			template <typename Arg>
+			callable_binding(Arg&& arg) : fx(std::forward<Arg>(arg)) {}
+
+			virtual int index(lua_State* L) override {
+				return call_detail::call_wrapped<T, true, true>(L, fx);
+			}
+
+			virtual int new_index(lua_State* L) override {
+				return call_detail::call_wrapped<T, false, true>(L, fx);
+			}
+		};
+
+		typedef std::unordered_map<std::string, std::unique_ptr<variable_wrapper>> variable_map;
+		typedef std::unordered_map<std::string, object> function_map;
+
+		struct simple_map {
+			const char* metakey;
+			variable_map variables;
+			function_map functions;
+			base_walk indexbaseclasspropogation;
+			base_walk newindexbaseclasspropogation;
+
+			simple_map(const char* mkey, base_walk index, base_walk newindex, variable_map&& vars, function_map&& funcs) : metakey(mkey), variables(std::move(vars)), functions(std::move(funcs)), indexbaseclasspropogation(index), newindexbaseclasspropogation(newindex) {}
+		};
 	}
 
 	struct usertype_metatable_core {
@@ -173,10 +208,11 @@ namespace sol {
 		inline int runtime_object_call(lua_State* L, void*, int runtimetarget) {
 			usertype_metatable_core& umc = stack::get<light<usertype_metatable_core>>(L, upvalue_index(2));
 			std::vector<object>& runtime = umc.runtime;
-			return stack::push(L, runtime[runtimetarget]);
+			object& runtimeobj = runtime[runtimetarget];
+			return stack::push(L, runtimeobj);
 		}
 
-		template <bool is_index>
+		template <typename T, bool is_index>
 		inline int indexing_fail(lua_State* L) {
 			if (is_index) {
 #if 0//def SOL_SAFE_USERTYPE
@@ -184,6 +220,15 @@ namespace sol {
 				string_detail::string_shim accessor = maybeaccessor.value_or(string_detail::string_shim("(unknown)"));
 				return luaL_error(L, "sol: attempt to index (get) nil value \"%s\" on userdata (bad (misspelled?) key name or does not exist)", accessor.c_str());
 #else
+				int isnum = 0;
+				lua_Integer magic = lua_tointegerx(L, upvalue_index(4), &isnum);
+				if (isnum != 0 && magic == toplevel_magic) {
+					if (lua_getmetatable(L, 1) == 1) {
+						int metatarget = lua_gettop(L);
+						stack::get_field(L, stack_reference(L, raw_index(2)), metatarget);
+						return 1;
+					}
+				}
 				// With runtime extensibility, we can't hard-error things. They have to return nil, like regular table types, unfortunately...
 				return stack::push(L, lua_nil);
 #endif
@@ -195,62 +240,97 @@ namespace sol {
 			}
 		}
 
+		int runtime_new_index(lua_State* L, void*, int runtimetarget);
+
 		template <typename T, bool is_simple>
 		inline int metatable_newindex(lua_State* L) {
 			int isnum = 0;
 			lua_Integer magic = lua_tointegerx(L, upvalue_index(4), &isnum);
 			if (isnum != 0 && magic == toplevel_magic) {
-				auto non_simple = [&L]() {
-					if (is_simple)
+				auto non_indexable = [&L]() {
+					if (is_simple) {
+						simple_map& sm = stack::get<user<simple_map>>(L, upvalue_index(1));
+						function_map& functions = sm.functions;
+						optional<std::string> maybeaccessor = stack::get<optional<std::string>>(L, 2);
+						if (!maybeaccessor) {
+							return;
+						}
+						std::string& accessor = maybeaccessor.value();
+						auto preexistingit = functions.find(accessor);
+						if (preexistingit == functions.cend()) {
+							functions.emplace_hint(preexistingit, std::move(accessor), sol::object(L, 3));
+						}
+						else {
+							preexistingit->second = sol::object(L, 3);
+						}
 						return;
+					}
 					usertype_metatable_core& umc = stack::get<light<usertype_metatable_core>>(L, upvalue_index(2));
 					bool mustindex = umc.mustindex;
 					if (!mustindex)
 						return;
-					std::string accessor = stack::get<std::string>(L, 2);
+					optional<std::string> maybeaccessor = stack::get<optional<std::string>>(L, 2);
+					if (!maybeaccessor) {
+						return;
+					}
+					std::string& accessor = maybeaccessor.value();
 					mapping_t& mapping = umc.mapping;
 					std::vector<object>& runtime = umc.runtime;
 					int target = static_cast<int>(runtime.size());
 					auto preexistingit = mapping.find(accessor);
 					if (preexistingit == mapping.cend()) {
 						runtime.emplace_back(L, 3);
-						mapping.emplace_hint(mapping.cend(), accessor, call_information(&runtime_object_call, &runtime_object_call, target));
+						mapping.emplace_hint(mapping.cend(), accessor, call_information(&runtime_object_call, &runtime_new_index, target));
 					}
 					else {
 						target = preexistingit->second.runtime_target;
 						runtime[target] = sol::object(L, 3);
-						preexistingit->second = call_information(&runtime_object_call, &runtime_object_call, target);
+						preexistingit->second = call_information(&runtime_object_call, &runtime_new_index, target);
 					}
 				};
-				non_simple();
-				for (std::size_t i = 0; i < 4; lua_pop(L, 1), ++i) {
+				non_indexable();
+				for (std::size_t i = 0; i < 4; lua_settop(L, 3), ++i) {
 					const char* metakey = nullptr;
 					switch (i) {
 					case 0:
 						metakey = &usertype_traits<T*>::metatable()[0];
+						luaL_getmetatable(L, metakey);
 						break;
 					case 1:
 						metakey = &usertype_traits<detail::unique_usertype<T>>::metatable()[0];
+						luaL_getmetatable(L, metakey);
 						break;
 					case 2:
-						metakey = &usertype_traits<T>::user_metatable()[0];
+						metakey = &usertype_traits<T>::metatable()[0];
+						luaL_getmetatable(L, metakey);
 						break;
 					case 3:
 					default:
-						metakey = &usertype_traits<T>::metatable()[0];
+						metakey = &usertype_traits<T>::user_metatable()[0];
+						{
+							luaL_getmetatable(L, metakey);
+							lua_getmetatable(L, -1);
+						}
 						break;
 					}
-					luaL_getmetatable(L, metakey);
 					int tableindex = lua_gettop(L);
 					if (type_of(L, tableindex) == type::lua_nil) {
 						continue;
 					}
-					stack::set_field<false, true>(L, stack_reference(L, 2), stack_reference(L, 3), tableindex);
+					stack::set_field<false, true>(L, stack_reference(L, raw_index(2)), stack_reference(L, raw_index(3)), tableindex);
 				}
 				lua_settop(L, 0);
 				return 0;
 			}
-			return indexing_fail<false>(L);
+			return indexing_fail<T, false>(L);
+		}
+		
+		inline int runtime_new_index(lua_State* L, void*, int runtimetarget) {
+			usertype_metatable_core& umc = stack::get<light<usertype_metatable_core>>(L, upvalue_index(2));
+			std::vector<object>& runtime = umc.runtime;
+			object& runtimeobj = runtime[runtimetarget];
+			runtimeobj = object(L, 3);
+			return 0;
 		}
 
 		template <bool is_index, typename Base>
@@ -408,6 +488,7 @@ namespace sol {
 
 		template <std::size_t, typename... Bases>
 		void make_regs(regs_t&, int&, base_classes_tag, bases<Bases...>) {
+			static_assert(!meta::any_same<T, Bases...>::value, "base classes cannot list the original class as part of the bases");
 			if (sizeof...(Bases) < 1) {
 				return;
 			}
@@ -459,7 +540,7 @@ namespace sol {
 		}
 
 		template <typename... Args, typename = std::enable_if_t<sizeof...(Args) == sizeof...(Tn)>>
-		usertype_metatable(Args&&... args) : usertype_metatable_core(&usertype_detail::indexing_fail<true>, &usertype_detail::metatable_newindex<T, false>), usertype_detail::registrar(),
+		usertype_metatable(Args&&... args) : usertype_metatable_core(&usertype_detail::indexing_fail<T, true>, &usertype_detail::metatable_newindex<T, false>), usertype_detail::registrar(),
 		functions(std::forward<Args>(args)...),
 		destructfunc(nullptr), callconstructfunc(nullptr),
 		indexbase(&core_indexing_call<true>), newindexbase(&core_indexing_call<false>),
@@ -469,8 +550,8 @@ namespace sol {
 		hasequals(false), hasless(false), haslessequals(false) {
 			std::initializer_list<typename usertype_detail::mapping_t::value_type> ilist{ {
 				std::pair<std::string, usertype_detail::call_information>( usertype_detail::make_string(std::get<I * 2>(functions)),
-					usertype_detail::call_information(&usertype_metatable::real_find_call<I * 2, I * 2 + 1, false>,
-						&usertype_metatable::real_find_call<I * 2, I * 2 + 1, true>)
+					usertype_detail::call_information(&usertype_metatable::real_find_call<I * 2, I * 2 + 1, true>,
+						&usertype_metatable::real_find_call<I * 2, I * 2 + 1, false>)
 					)
 			}... };
 			this->mapping.insert(ilist);
@@ -513,7 +594,7 @@ namespace sol {
 			auto memberit = f.mapping.find(name);
 			if (memberit != f.mapping.cend()) {
 				const usertype_detail::call_information& ci = memberit->second;
-				const usertype_detail::member_search& member = is_index ? ci.second : ci.first;
+				const usertype_detail::member_search& member = is_index ? ci.index: ci.new_index;
 				return (member)(L, static_cast<void*>(&f), ci.runtime_target);
 			}
 			string_detail::string_shim accessor = name;

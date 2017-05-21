@@ -1,6 +1,6 @@
 // The MIT License (MIT) 
 
-// Copyright (c) 2013-2016 Rapptz, ThePhD and contributors
+// Copyright (c) 2013-2017 Rapptz, ThePhD and contributors
 
 // Permission is hereby granted, free of charge, to any person obtaining a copy of
 // this software and associated documentation files (the "Software"), to deal in
@@ -633,6 +633,7 @@ namespace sol {
 	class thread;
 	struct variadic_args;
 	struct this_state;
+	struct this_environment;
 
 	namespace detail {
 		template <typename T, typename = void>
@@ -704,14 +705,14 @@ namespace sol {
 		template <bool b, typename Base>
 		struct lua_type_of<basic_table_core<b, Base>> : std::integral_constant<type, type::table> { };
 
-		template <typename B>
-		struct lua_type_of<basic_environment<B>> : std::integral_constant<type, type::table> { };
-
 		template <>
 		struct lua_type_of<metatable_t> : std::integral_constant<type, type::table> { };
 
+		template <typename B>
+		struct lua_type_of<basic_environment<B>> : std::integral_constant<type, type::poly> { };
+
 		template <>
-		struct lua_type_of<env_t> : std::integral_constant<type, type::table> { };
+		struct lua_type_of<env_t> : std::integral_constant<type, type::poly> { };
 
 		template <>
 		struct lua_type_of<new_table> : std::integral_constant<type, type::table> { };
@@ -784,6 +785,9 @@ namespace sol {
 
 		template <>
 		struct lua_type_of<this_state> : std::integral_constant<type, type::poly> {};
+
+		template <>
+		struct lua_type_of<this_environment> : std::integral_constant<type, type::poly> {};
 
 		template <>
 		struct lua_type_of<type> : std::integral_constant<type, type::poly> {};
@@ -902,6 +906,9 @@ namespace sol {
 	struct is_transparent_argument<this_state> : std::true_type {};
 
 	template <>
+	struct is_transparent_argument<this_environment> : std::true_type {};
+
+	template <>
 	struct is_transparent_argument<variadic_args> : std::true_type {};
 
 	template <typename T>
@@ -940,6 +947,9 @@ namespace sol {
 	struct is_userdata : std::false_type {};
 	template <typename T>
 	struct is_userdata<basic_userdata<T>> : std::true_type {};
+
+	template <typename T>
+	struct is_environment : std::integral_constant<bool, is_userdata<T>::value || is_table<T>::value> {};
 
 	template <typename T>
 	struct is_container : detail::is_container<T>{};

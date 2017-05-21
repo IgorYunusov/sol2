@@ -35,6 +35,8 @@ TEST_CASE("environments/get", "Envronments can be taken out of things like Lua f
 	sol::object global_test = lua["test"];
 	REQUIRE(!global_test.valid());
 
+	lua.script("h = function() end");
+
 	lua.set_function("check_f_env",
 		[&lua, &env_f](sol::object target) {
 		sol::stack_guard sg(lua);
@@ -57,10 +59,17 @@ TEST_CASE("environments/get", "Envronments can be taken out of things like Lua f
 		REQUIRE(env_g == target_env);
 	}
 	);
+	lua.set_function("check_h_env",
+		[&lua](sol::function target) {
+		sol::stack_guard sg(lua);
+		sol::environment target_env = sol::get_environment(target);
+	}
+	);
 
 	REQUIRE_NOTHROW([&lua]() {
 		lua.script("check_f_env(f)");
 		lua.script("check_g_env(g)");
+		lua.script("check_h_env(h)");
 	}());
 }
 
@@ -190,5 +199,39 @@ TEST_CASE("environments/functions", "see if environments on functions are workin
 		// the global environment is not polluted
 		auto gtest = lua["test"];
 		REQUIRE(!gtest.valid());
+	}
+}
+
+TEST_CASE("environments/this_environment", "test various situations of pulling out an environment") {
+	static std::string code = "return (f(10))";
+	
+	sol::state lua;
+
+	lua["f"] = [](sol::this_environment te, int x, sol::this_state ts) {
+		if (te) {
+			sol::environment& env = te;
+			return x + static_cast<int>(env["x"]);
+		}
+		sol::state_view lua = ts;
+		return x + static_cast<int>(lua["x"]);
+	};
+	
+	sol::environment e(lua, sol::create, lua.globals());
+	lua["x"] = 5;
+	e["x"] = 20;
+	SECTION("from Lua script") {
+		int value = lua.script(code, e);
+		REQUIRE(value == 30);
+	}
+	SECTION("from C++") {
+		sol::function f = lua["f"];
+		e.set_on(f);
+		int value = f(10);
+		REQUIRE(value == 30);
+	}
+	SECTION("from C++, with no env") {
+		sol::function f = lua["f"];
+		int value = f(10);
+		REQUIRE(value == 15);
 	}
 }

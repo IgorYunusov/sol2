@@ -1,6 +1,6 @@
 // The MIT License (MIT) 
 
-// Copyright (c) 2013-2016 Rapptz, ThePhD and contributors
+// Copyright (c) 2013-2017 Rapptz, ThePhD and contributors
 
 // Permission is hereby granted, free of charge, to any person obtaining a copy of
 // this software and associated documentation files (the "Software"), to deal in
@@ -137,6 +137,15 @@ namespace sol {
 		};
 
 		template <typename C>
+		struct checker<this_environment, type::poly, C> {
+			template <typename Handler>
+			static bool check(lua_State*, int, Handler&&, record& tracking) {
+				tracking.use(0);
+				return true;
+			}
+		};
+
+		template <typename C>
 		struct checker<variadic_args, type::poly, C> {
 			template <typename Handler>
 			static bool check(lua_State*, int, Handler&&, record& tracking) {
@@ -195,6 +204,14 @@ namespace sol {
 					handler(L, index, type::userdata, t);
 				}
 				return success;
+			}
+		};
+
+		template <typename B, typename C>
+		struct checker<basic_userdata<B>, type::userdata, C> {
+			template <typename Handler>
+			static bool check(lua_State* L, int index, Handler&& handler, record& tracking) {
+				return stack::check<userdata_value>(L, index, std::forward<Handler>(handler), tracking);
 			}
 		};
 
@@ -281,6 +298,28 @@ namespace sol {
 				}
 				if (t != type::userdata) {
 					lua_pop(L, 1);
+					handler(L, index, expected, t);
+					return false;
+				}
+				return true;
+			}
+		};
+
+		template <typename C>
+		struct checker<env_t, type::poly, C> {
+			template <typename Handler>
+			static bool check(lua_State* L, int index, Handler&& handler, record& tracking) {
+				tracking.use(1);
+				if (lua_getmetatable(L, index) == 0) {
+					return true;
+				}
+				type t = type_of(L, -1);
+				if (t == type::table || t == type::none || t == type::nil) {
+					lua_pop(L, 1);
+					return true;
+				}
+				if (t != type::userdata) {
+					lua_pop(L, 1);
 					handler(L, index, type::table, t);
 					return false;
 				}
@@ -288,8 +327,8 @@ namespace sol {
 			}
 		};
 
-		template <type expected, typename C>
-		struct checker<env_t, expected, C> {
+		template <typename E, typename C>
+		struct checker<basic_environment<E>, type::poly, C> {
 			template <typename Handler>
 			static bool check(lua_State* L, int index, Handler&& handler, record& tracking) {
 				tracking.use(1);

@@ -1,6 +1,6 @@
 // The MIT License (MIT)
 
-// Copyright (c) 2013-2016 Rapptz, ThePhD and contributors
+// Copyright (c) 2013-2017 Rapptz, ThePhD and contributors
 
 // Permission is hereby granted, free of charge, to any person obtaining a copy of
 // this software and associated documentation files (the "Software"), to deal in
@@ -34,7 +34,7 @@ namespace sol {
 			typedef std::array<char, 1> one;
 			typedef std::array<char, 2> two;
 
-			template <typename C> static one test(decltype(&C::find));
+			template <typename C> static one test(decltype(std::declval<C>().find(std::declval<std::add_rvalue_reference_t<typename C::value_type>>()))*);
 			template <typename C> static two test(...);
 
 		public:
@@ -159,6 +159,9 @@ namespace sol {
 					else if (name == "clear") {
 						return stack::push(L, &clear_call);
 					}
+					else if (name == "find") {
+						return stack::push(L, &find_call);
+					}
 				}
 			}
 			return stack::push(L, lua_nil);
@@ -190,6 +193,9 @@ namespace sol {
 					}
 					else if (name == "clear") {
 						return stack::push(L, &clear_call);
+					}
+					else if (name == "find") {
+						return stack::push(L, &find_call);
 					}
 				}
 			}
@@ -241,7 +247,7 @@ namespace sol {
 			auto it = begin(src);
 			--k;
 			if (k == src.size()) {
-				real_add_call_push(std::integral_constant<bool, detail::has_push_back<T>::value>(), L, src, 1);
+				real_add_call_push(std::integral_constant<bool, detail::has_push_back<T>::value && std::is_copy_constructible<V>::value>(), L, src, 1);
 				return 0;
 			}
 			std::advance(it, k);
@@ -250,7 +256,7 @@ namespace sol {
 		}
 
 		static int real_new_index_call(lua_State* L) {
-			return real_new_index_call_const(meta::neg<meta::any<std::is_const<V>, std::is_const<IR>>>(), is_associative(), L);
+			return real_new_index_call_const(meta::neg<meta::any<std::is_const<V>, std::is_const<IR>, meta::neg<std::is_copy_assignable<V>>>>(), is_associative(), L);
 		}
 
 		static int real_pairs_next_call_assoc(std::true_type, lua_State* L) {
@@ -328,7 +334,7 @@ namespace sol {
 		}
 
 		static int real_add_call_push(std::false_type, lua_State*L, T& src, int boost = 0) {
-			return real_add_call_insert(std::integral_constant<bool, detail::has_insert<T>::value>(), L, src, boost);
+			return real_add_call_insert(std::integral_constant<bool, detail::has_insert<T>::value && std::is_copy_constructible<V>::value>(), L, src, boost);
 		}
 
 		static int real_add_call_associative(std::true_type, lua_State* L) {
@@ -337,7 +343,7 @@ namespace sol {
 
 		static int real_add_call_associative(std::false_type, lua_State* L) {
 			auto& src = get_src(L);
-			return real_add_call_push(std::integral_constant<bool, detail::has_push_back<T>::value>(), L, src);
+			return real_add_call_push(std::integral_constant<bool, detail::has_push_back<T>::value && std::is_copy_constructible<V>::value>(), L, src);
 		}
 
 		static int real_add_call_capable(std::true_type, lua_State* L) {
@@ -350,7 +356,7 @@ namespace sol {
 		}
 
 		static int real_add_call(lua_State* L) {
-			return real_add_call_capable(std::integral_constant<bool, detail::has_push_back<T>::value || detail::has_insert<T>::value>(), L);
+			return real_add_call_capable(std::integral_constant<bool, (detail::has_push_back<T>::value || detail::has_insert<T>::value) && std::is_copy_constructible<V>::value>(), L);
 		}
 
 		static int real_insert_call_capable(std::false_type, std::false_type, lua_State*L) {
@@ -374,7 +380,7 @@ namespace sol {
 		}
 
 		static int real_insert_call(lua_State*L) {
-			return real_insert_call_capable(std::integral_constant<bool, detail::has_insert<T>::value>(), is_associative(), L);
+			return real_insert_call_capable(std::integral_constant<bool, detail::has_insert<T>::value && std::is_copy_assignable<V>::value>(), is_associative(), L);
 		}
 
 		static int real_clear_call_capable(std::false_type, lua_State* L) {
@@ -392,6 +398,36 @@ namespace sol {
 			return real_clear_call_capable(std::integral_constant<bool, detail::has_clear<T>::value>(), L);
 		}
 
+		static int real_find_call_capable(std::false_type, std::false_type, lua_State*L) {
+			static const std::string& s = detail::demangle<T>();
+			return luaL_error(L, "sol: cannot call find on type %s", s.c_str());
+		}
+
+		static int real_find_call_capable(std::false_type, std::true_type, lua_State*L) {
+			return real_index_call(L);
+		}
+
+		static int real_find_call_capable(std::true_type, std::false_type, lua_State* L) {
+			auto k = stack::check_get<V>(L, 2);
+			if (k) {
+				auto& src = get_src(L);
+				auto it = src.find(*k);
+				if (it != src.end()) {
+					auto& v = *it;
+					return stack::push_reference(L, v);
+				}
+			}
+			return stack::push(L, lua_nil);
+		}
+
+		static int real_find_call_capable(std::true_type, std::true_type, lua_State* L) {
+			return real_index_call(L);
+		}
+
+		static int real_find_call(lua_State*L) {
+			return real_find_call_capable(std::integral_constant<bool, detail::has_find<T>::value>(), is_associative(), L);
+		}
+
 		static int add_call(lua_State*L) {
 			return detail::static_trampoline<(&real_add_call)>(L);
 		}
@@ -402,6 +438,10 @@ namespace sol {
 
 		static int clear_call(lua_State*L) {
 			return detail::static_trampoline<(&real_clear_call)>(L);
+		}
+
+		static int find_call(lua_State*L) {
+			return detail::static_trampoline<(&real_find_call)>(L);
 		}
 
 		static int length_call(lua_State*L) {
@@ -430,7 +470,7 @@ namespace sol {
 			template <typename T>
 			inline auto container_metatable() {
 				typedef container_usertype_metatable<std::remove_pointer_t<T>> meta_cumt;
-				std::array<luaL_Reg, 10> reg = { {
+				std::array<luaL_Reg, 11> reg = { {
 					{ "__index", &meta_cumt::index_call },
 					{ "__newindex", &meta_cumt::new_index_call },
 					{ "__pairs", &meta_cumt::pairs_call },
@@ -439,6 +479,7 @@ namespace sol {
 					{ "clear", &meta_cumt::clear_call },
 					{ "insert", &meta_cumt::insert_call },
 					{ "add", &meta_cumt::add_call },
+					{ "find", &meta_cumt::find_call },
 					std::is_pointer<T>::value ? luaL_Reg{ nullptr, nullptr } : luaL_Reg{ "__gc", &detail::usertype_alloc_destroy<T> },
 					{ nullptr, nullptr }
 				} };

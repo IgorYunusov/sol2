@@ -289,6 +289,11 @@ end
 function i (x)
 	x:clear()
 end
+
+function sf (x,v)
+	return x:find(v)
+end
+
 )");
 
 	// Have the function we 
@@ -296,6 +301,7 @@ end
 	sol::function g = lua["g"];
 	sol::function h = lua["h"];
 	sol::function i = lua["i"];
+	sol::function sf = lua["sf"];
 
 	// Set a global variable called 
 	// "arr" to be a vector of 5 lements
@@ -315,6 +321,20 @@ end
 	REQUIRE(arr.size() == 6);
 	REQUIRE(map.size() == 6);
 	REQUIRE(set.size() == 6);
+
+	{
+		int r = sf(set, 8);
+		REQUIRE(r == 8);
+		sol::object rn = sf(set, 9);
+		REQUIRE(rn == sol::nil);
+	}
+
+	{
+		int r = sf(map, 3);
+		REQUIRE(r == 6);
+		sol::object rn = sf(map, 9);
+		REQUIRE(rn == sol::nil);
+	}
 
 	i(lua["arr"]);
 	i(lua["map"]);
@@ -557,4 +577,47 @@ end
 	lua["f_append"](vec2);
 	REQUIRE(vec2.size() == 4);
 	REQUIRE(vec2 == append_cmp);
+}
+
+TEST_CASE("containers/non_copyable", "make sure non-copyable types in containers behave properly when stored as a member variable in a bound usertype") {
+	struct non_copyable {
+		non_copyable(non_copyable&& other) noexcept = default;
+		non_copyable& operator=(non_copyable&& other) noexcept = default;
+		non_copyable(const non_copyable& other) noexcept = delete;
+		non_copyable& operator=(const non_copyable& other) noexcept = delete;
+	};
+	struct test {
+		std::vector<non_copyable> b;
+
+		test() : b() {}
+		test(test&&) = default;
+		test& operator=(test&&) = default;
+		test(const test&) = delete;
+		test& operator=(const test&) = delete;
+	};
+
+	SECTION("normal") {
+		sol::state lua;
+		lua.new_usertype<test>("test",
+			"b", sol::readonly(&test::b)
+		);
+
+		lua["v"] = std::vector<non_copyable>{};
+
+		REQUIRE_THROWS([&lua]() {
+			lua.script("t = test.new()\nt.b = v");
+		}());
+	}
+	SECTION("simple") {
+		sol::state lua;
+		lua.new_simple_usertype<test>("test",
+			"b", sol::readonly(&test::b)
+		);
+		
+		lua["v"] = std::vector<non_copyable>{};
+
+		REQUIRE_THROWS([&lua]() {
+			lua.script("t = test.new()\nt.b = v");
+		}());
+	}
 }
