@@ -876,3 +876,69 @@ TEST_CASE("simple_usertype/static-properties", "allow for static functions to ge
 	double v2a = lua["v2a"];
 	REQUIRE(v2a == 60.5);
 }
+
+TEST_CASE("simple_usertype/indexing", "make sure simple usertypes can be indexed/new_indexed properly without breaking") {
+	static int val = 0;
+	
+	class indexing_test {
+	public:
+		indexing_test() { val = 0; }
+
+		sol::object getter(const std::string& name, sol::this_state _s) {
+			REQUIRE(name == "a");
+			return sol::make_object(_s, 2);
+		}
+
+		void setter(std::string name, sol::object n) {
+			REQUIRE(name == "unknown");
+			val = n.as<int>();
+		}
+
+		int hi() {
+			std::cout << "hi" << std::endl;
+			return 25;
+		}
+	};
+
+	SECTION("no-runtime-additions") {
+		sol::state lua;
+		lua.open_libraries(sol::lib::base);
+		lua.new_simple_usertype<indexing_test>("test",
+			sol::meta_function::index, &indexing_test::getter,
+			sol::meta_function::new_index, &indexing_test::setter
+			);
+
+		lua.script(R"(	
+		local t = test.new()
+		v = t.a;
+		print(v)
+		t.unknown = 50;
+		)");
+		int v = lua["v"];
+		REQUIRE(v == 2);
+		REQUIRE(val == 50);
+	}
+	SECTION("runtime-additions") {
+		sol::state lua;
+		lua.open_libraries(sol::lib::base);
+		lua.new_simple_usertype<indexing_test>("test",
+			sol::meta_function::index, &indexing_test::getter,
+			sol::meta_function::new_index, &indexing_test::setter
+			);
+
+		lua["test"]["hi"] = [](indexing_test& _self) -> int { return _self.hi(); };
+
+		lua.script(R"(	
+		local t = test.new()
+		v = t.a;
+		print(v)
+		t.unknown = 50
+		u = t:hi()
+		)");
+		int v = lua["v"];
+		int u = lua["u"];
+		REQUIRE(v == 2);
+		REQUIRE(u == 25);
+		REQUIRE(val == 50);
+	}
+}
