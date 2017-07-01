@@ -99,6 +99,10 @@ struct fer {
 	}
 };
 
+static int raw_noexcept_function(lua_State* L) noexcept {
+	return sol::stack::push(L, 0x63);
+}
+
 TEST_CASE("functions/tuple-returns", "Make sure tuple returns are ordered properly") {
 	sol::state lua;
 	lua.script("function f() return '3', 4 end");
@@ -240,7 +244,7 @@ nested = { variables = { no = { problem = 10 } } } )");
 	REQUIRE(cd == cddesired);
 
 	ab = cpp_bark(std::make_pair(lua_variable_x, cpp_variable_y));
-	cd = lua_bark(std::make_pair(lua["nested"]["variables"]["no"]["problem"], cpp_variable_y));
+	cd = static_cast<std::pair<int, int>>(lua_bark(std::make_pair(lua["nested"]["variables"]["no"]["problem"], cpp_variable_y)));
 
 	REQUIRE(ab == abdesired);
 	REQUIRE(cd == cddesired);
@@ -1134,4 +1138,311 @@ TEST_CASE("functions/set_function-already-wrapped", "setting a function returned
 		REQUIRE_NOTHROW(lua.script("assert(test() ~= nil)"));
 		REQUIRE_NOTHROW(lua.script("assert(test() == 5)"));
 	}
+}
+
+TEST_CASE("functions/pointer-nil", "ensure specific semantics for handling pointer-nils passed through sol") {
+	struct nil_test {
+
+		static void f(nil_test* p) {
+			REQUIRE(p == nullptr);
+		}
+		static void g(std::unique_ptr<nil_test>& p) {
+			REQUIRE(p == nullptr);
+		}
+		static void h(std::shared_ptr<nil_test>& p) {
+			REQUIRE(p == nullptr);
+		}
+	};
+	
+	std::shared_ptr<nil_test> sptr;
+	std::unique_ptr<nil_test> uptr;
+	std::unique_ptr<nil_test> ruptr;
+	nil_test* rptr = ruptr.get();
+	nil_test* vptr = nullptr;
+
+	SECTION("ptr") {
+		sol::state lua;
+		lua["v1"] = sptr;
+		lua["v2"] = std::unique_ptr<nil_test>();
+		lua["v3"] = rptr;
+		lua["v4"] = vptr;
+
+		REQUIRE_NOTHROW([&]() {
+			nil_test* v1 = lua["v1"];
+			nil_test* v2 = lua["v2"];
+			nil_test* v3 = lua["v3"];
+			nil_test* v4 = lua["v4"];
+			REQUIRE(v1 == sptr.get());
+			REQUIRE(v1 == nullptr);
+			REQUIRE(v2 == uptr.get());
+			REQUIRE(v2 == nullptr);
+			REQUIRE(v3 == rptr);
+			REQUIRE(v3 == nullptr);
+			REQUIRE(v4 == vptr);
+			REQUIRE(v4 == nullptr);
+		}());
+	}
+	SECTION("ptr") {
+		sol::state lua;
+		lua.open_libraries();
+
+		lua["v1"] = sptr;
+		lua["v2"] = std::unique_ptr<nil_test>();
+		lua["v3"] = rptr;
+		lua["v4"] = vptr;
+		lua["f"] = &nil_test::f;
+		lua["g"] = &nil_test::g;
+		lua["h"] = &nil_test::h;
+
+		REQUIRE_NOTHROW([&]() {
+			lua.script("f(v1)");
+			lua.script("f(v2)");
+			lua.script("f(v3)");
+			lua.script("f(v4)");
+
+			lua.script("assert(v1 == nil)");
+			lua.script("assert(v2 == nil)");
+			lua.script("assert(v3 == nil)");
+			lua.script("assert(v4 == nil)");
+		}());
+	}
+	SECTION("throw unique argument") {
+		sol::state lua;
+		lua["v2"] = std::unique_ptr<nil_test>();
+		lua["g"] = &nil_test::g;
+
+		REQUIRE_THROWS([&]() {
+			lua.script("g(v2)");
+		}());
+	}
+	SECTION("throw shared argument") {
+		sol::state lua;
+		lua["v1"] = sptr;
+		lua["h"] = &nil_test::h;
+
+		REQUIRE_THROWS([&]() {
+			lua.script("h(v1)");
+		}());
+	}
+	SECTION("throw ref") {
+		REQUIRE_THROWS([&]() {
+			sol::state lua;
+			lua["v1"] = sptr;
+			nil_test& v1 = lua["v1"];
+			(void)(&v1 == sptr.get());
+		}());
+		REQUIRE_THROWS([&]() {
+			sol::state lua;
+			lua["v2"] = std::unique_ptr<nil_test>();
+			nil_test& v2 = lua["v2"];
+			(void)(&v2 == uptr.get());
+		}());
+		REQUIRE_THROWS([&]() {
+			sol::state lua;
+			lua["v3"] = rptr;
+			nil_test& v3 = lua["v3"];
+			(void)(&v3 == rptr);
+		}());
+		REQUIRE_THROWS([&]() {
+			sol::state lua;
+			lua["v4"] = vptr;
+			nil_test& v4 = lua["v4"];
+			(void)(&v4 == vptr);
+		}());
+	}
+	SECTION("throw unique") {
+		REQUIRE_THROWS([&]() {
+			sol::state lua;
+			lua["v1"] = sptr;
+			std::unique_ptr<nil_test>& v1 = lua["v1"];
+			(void)(v1.get() == sptr.get());
+		}());
+		REQUIRE_THROWS([&]() {
+			sol::state lua;
+			lua["v2"] = std::unique_ptr<nil_test>();
+			std::unique_ptr<nil_test>& v2 = lua["v2"];
+			(void)(v2.get() == uptr.get());
+		}());
+		REQUIRE_THROWS([&]() {
+			sol::state lua;
+			lua["v3"] = rptr;
+			std::unique_ptr<nil_test>& v3 = lua["v3"];
+			(void)(v3.get() == rptr);
+		}());
+		REQUIRE_THROWS([&]() {
+			sol::state lua;
+			lua["v4"] = vptr;
+			std::unique_ptr<nil_test>& v4 = lua["v4"];
+			(void)(v4.get() == vptr);
+		}());
+	}
+	SECTION("throw shared") {
+		REQUIRE_THROWS([&]() {
+			sol::state lua;
+			lua["v1"] = sptr;
+			std::shared_ptr<nil_test>& v1 = lua["v1"];
+			(void)(v1.get() == sptr.get());
+		}());
+		REQUIRE_THROWS([&]() {
+			sol::state lua;
+			lua["v2"] = std::unique_ptr<nil_test>();
+			std::shared_ptr<nil_test>& v2 = lua["v2"];
+			(void)(v2.get() == uptr.get());
+		}());
+		REQUIRE_THROWS([&]() {
+			sol::state lua;
+			lua["v3"] = rptr;
+			std::shared_ptr<nil_test>& v3 = lua["v3"];
+			(void)(v3.get() == rptr);
+		}());
+		REQUIRE_THROWS([&]() {
+			sol::state lua;
+			lua["v4"] = vptr;
+			std::shared_ptr<nil_test>& v4 = lua["v4"];
+			(void)(v4.get() == vptr);
+		}());
+	}
+}
+
+TEST_CASE("functions/unique_usertype-overloading", "make sure overloading can work with ptr vs. specifically asking for a unique_usertype") {
+	struct test { 
+		int special_value = 17;
+		test() : special_value(17) {}
+		test(int special_value) : special_value(special_value) {}
+	};
+	auto print_up_test = [](std::unique_ptr<test>& x) {
+		REQUIRE(x->special_value == 21);
+	};
+	auto print_up_2_test = [](int, std::unique_ptr<test>& x) {
+		REQUIRE(x->special_value == 21);
+	};
+	auto print_sp_test = [](std::shared_ptr<test>& x) {
+		REQUIRE(x->special_value == 44);
+	};
+	auto print_ptr_test = [](test* x) {
+		REQUIRE(x->special_value == 17);
+	};
+	auto print_ref_test = [](test& x) {
+		bool is_any = x.special_value == 17
+			|| x.special_value == 21
+			|| x.special_value == 44;
+		REQUIRE(is_any);
+	};
+	using f_t = void(test&);
+	f_t* fptr = print_ref_test;
+	
+	std::unique_ptr<test> ut = std::make_unique<test>(17);
+	SECTION("working") {
+		sol::state lua;
+
+		lua.set_function("f", print_up_test);
+		lua.set_function("g", sol::overload(
+			std::move(print_sp_test),
+			print_up_test,
+			std::ref(print_ptr_test)
+		));
+		lua.set_function("h", std::ref(fptr));
+		lua.set_function("i", std::move(print_up_2_test));
+
+		lua["v1"] = std::make_unique<test>(21);
+		lua["v2"] = std::make_shared<test>(44);
+		lua["v3"] = test(17);
+		lua["v4"] = ut.get();
+
+		REQUIRE_NOTHROW([&]() {
+			lua.script("f(v1)");
+			lua.script("g(v1)");
+			lua.script("g(v2)");
+			lua.script("g(v3)");
+			lua.script("g(v4)");
+			lua.script("h(v1)");
+			lua.script("h(v2)");
+			lua.script("h(v3)");
+			lua.script("h(v4)");
+			lua.script("i(20, v1)");
+		}());
+	};
+	// LuaJIT segfaults hard on some Linux machines
+	// and it breaks all the tests...
+	SECTION("throws-value") {
+		sol::state lua;
+
+		lua.set_function("f", print_up_test);
+		lua["v3"] = test(17);
+
+		REQUIRE_THROWS([&]() {
+			lua.script("f(v3)");
+		}());
+	};
+	SECTION("throws-shared_ptr") {
+		sol::state lua;
+
+		lua.set_function("f", print_up_test);
+		lua["v2"] = std::make_shared<test>(44);
+
+		REQUIRE_THROWS([&]() {
+			lua.script("f(v2)");
+		}());
+	};
+	SECTION("throws-ptr") {
+		sol::state lua;
+
+		lua.set_function("f", print_up_test);
+		lua["v4"] = ut.get();
+
+		REQUIRE_THROWS([&]() {
+			lua.script("f(v4)");
+		}());
+	};
+}
+
+TEST_CASE("functions/noexcept", "allow noexcept functions to be serialized properly into Lua using sol2") {
+	struct T {
+		static int noexcept_function() noexcept {
+			return 0x61;
+		}
+
+		int noexcept_method() noexcept { 
+			return 0x62; 
+		}
+	} t;
+	
+	lua_CFunction ccall = sol::c_call<decltype(&raw_noexcept_function), &raw_noexcept_function>;
+
+	sol::state lua;
+	
+	lua.set_function("f", &T::noexcept_function);
+	lua.set_function("g", &T::noexcept_method);
+	lua.set_function("h", &T::noexcept_method, T());
+	lua.set_function("i", &T::noexcept_method, std::ref(t));
+	lua.set_function("j", &T::noexcept_method, &t);
+	lua.set_function("k", &T::noexcept_method, t);
+	lua.set_function("l", &raw_noexcept_function);
+	lua.set_function("m", ccall);
+
+	lua["t"] = T();
+	lua.script("v1 = f()");
+	lua.script("v2 = g(t)");
+	lua.script("v3 = h()");
+	lua.script("v4 = i()");
+	lua.script("v5 = j()");
+	lua.script("v6 = k()");
+	lua.script("v7 = l()");
+	lua.script("v8 = m()");
+	int v1 = lua["v1"];
+	int v2 = lua["v2"];
+	int v3 = lua["v3"];
+	int v4 = lua["v4"];
+	int v5 = lua["v5"];
+	int v6 = lua["v6"];
+	int v7 = lua["v7"];
+	int v8 = lua["v8"];
+	REQUIRE(v1 == 0x61);
+	REQUIRE(v2 == 0x62);
+	REQUIRE(v3 == 0x62);
+	REQUIRE(v4 == 0x62);
+	REQUIRE(v5 == 0x62);
+	REQUIRE(v6 == 0x62);
+	REQUIRE(v7 == 0x63);
+	REQUIRE(v8 == 0x63);
 }
